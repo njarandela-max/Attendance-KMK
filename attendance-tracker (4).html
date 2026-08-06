@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KMK Laundry - Attendance</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --border:#e2e4e8; --text:#1f2430; --muted:#6b7280;
+    --accent:#2563eb; --present:#16a34a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); padding:20px;
+  }
+  .wrap{max-width:480px;margin:0 auto;}
+  h1{font-size:20px;font-weight:600;margin:0 0 4px;}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px;}
+  input[type=text], select{
+    width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;
+    font-size:15px;background:#fff;color:var(--text);margin-bottom:14px;
+  }
+  .suggestions{
+    border:1px solid var(--border);border-radius:8px;margin-top:-10px;margin-bottom:14px;
+    max-height:160px;overflow-y:auto;background:#fff;
+  }
+  .suggestion-item{padding:10px 12px;font-size:14px;cursor:pointer;}
+  .suggestion-item:hover{background:#f4f5f7;}
+  .suggestion-item:not(:last-child){border-bottom:1px solid var(--border);}
+  .selected-name{
+    display:flex;align-items:center;justify-content:space-between;
+    background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;
+    padding:10px 12px;margin-bottom:14px;font-size:14px;font-weight:500;
+  }
+  .clear-btn{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;}
+  .present-btn{
+    width:100%;padding:14px;border:none;border-radius:10px;background:var(--present);
+    color:#fff;font-size:15px;font-weight:600;cursor:pointer;
+  }
+  .present-btn:disabled{background:#d1d5db;cursor:not-allowed;}
+  .present-btn:active:not(:disabled){opacity:0.85;}
+  .status-msg{text-align:center;font-size:13px;color:var(--muted);margin-top:10px;min-height:16px;}
+  .history{margin-top:20px;}
+  .history-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .history h2{font-size:15px;font-weight:600;margin:0;}
+  .refresh-btn{
+    background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 12px;
+    font-size:12px;cursor:pointer;color:var(--text);
+  }
+  .hist-entry{
+    display:flex;align-items:center;justify-content:space-between;
+    border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff;font-size:13px;
+  }
+  .hist-left{display:flex;flex-direction:column;gap:2px;}
+  .hist-name{font-weight:500;}
+  .hist-meta{color:var(--muted);font-size:12px;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--present);display:inline-block;margin-right:6px;}
+  .empty{color:var(--muted);font-size:13px;text-align:center;padding:20px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>KMK Laundry — Attendance</h1>
+  <div class="sub">Search a name, pick the shift, mark present</div>
+
+  <div class="card">
+    <div id="searchArea">
+      <label for="search">Employee name</label>
+      <input type="text" id="search" placeholder="Type a name..." autocomplete="off">
+      <div class="suggestions" id="suggestions" style="display:none;"></div>
+    </div>
+    <div id="selectedArea" style="display:none;">
+      <div class="selected-name">
+        <span id="selectedName"></span>
+        <button class="clear-btn" id="clearBtn">change</button>
+      </div>
+    </div>
+
+    <label for="shift">Shift</label>
+    <select id="shift">
+      <option value="Morning">Morning</option>
+      <option value="Evening">Evening</option>
+    </select>
+
+    <button class="present-btn" id="presentBtn" disabled>Present</button>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+
+  <div class="history">
+    <div class="history-head">
+      <h2>Today's attendance</h2>
+      <button class="refresh-btn" id="refreshBtn">Refresh</button>
+    </div>
+    <div id="historyList"><div class="empty">Loading...</div></div>
+  </div>
+</div>
+
+<script>
+const EMPLOYEES = ["Aaron","Kenneth","Kevin","Lebert","Laurence","Macklyn"];
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzeHv27CI1_dl-XRLmuA6DAI5K4ijUN_6PkB2xMRFe5AZ_D45yFeUWYLxqauLcqIGeU/exec";
+let selectedEmployee = null;
+
+const searchInput = document.getElementById('search');
+const suggestionsEl = document.getElementById('suggestions');
+const selectedArea = document.getElementById('selectedArea');
+const searchArea = document.getElementById('searchArea');
+const selectedNameEl = document.getElementById('selectedName');
+const presentBtn = document.getElementById('presentBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+function todayStr(){
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - off*60000);
+  return local.toISOString().slice(0,10);
+}
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q){ suggestionsEl.style.display = 'none'; return; }
+  const matches = EMPLOYEES.filter(n => n.toLowerCase().includes(q));
+  if (matches.length === 0){ suggestionsEl.style.display = 'none'; return; }
+  suggestionsEl.innerHTML = matches.map(n => `<div class="suggestion-item" data-name="${n}">${n}</div>`).join('');
+  suggestionsEl.style.display = 'block';
+  suggestionsEl.querySelectorAll('.suggestion-item').forEach(item => {
+    item.addEventListener('click', () => selectEmployee(item.getAttribute('data-name')));
+  });
+});
+
+function selectEmployee(name){
+  selectedEmployee = name;
+  selectedNameEl.textContent = name;
+  searchArea.style.display = 'none';
+  selectedArea.style.display = 'block';
+  suggestionsEl.style.display = 'none';
+  presentBtn.disabled = false;
+}
+
+clearBtn.addEventListener('click', () => {
+  selectedEmployee = null;
+  searchInput.value = '';
+  searchArea.style.display = 'block';
+  selectedArea.style.display = 'none';
+  presentBtn.disabled = true;
+});
+
+presentBtn.addEventListener('click', async () => {
+  if (!selectedEmployee) return;
+  const shift = document.getElementById('shift').value;
+  const date = todayStr();
+  const time = new Date().toLocaleTimeString();
+  const msgEl = document.getElementById('statusMsg');
+  presentBtn.disabled = true;
+  msgEl.textContent = 'Saving...';
+  try{
+    await fetch(SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({date, shift, name: selectedEmployee, time})
+    });
+    msgEl.textContent = `${selectedEmployee} marked present.`;
+    clearBtn.click();
+    setTimeout(loadHistory, 1200);
+  }catch(e){
+    msgEl.textContent = 'Save failed. Check your internet connection.';
+    presentBtn.disabled = false;
+  }
+  setTimeout(() => { msgEl.textContent = ''; }, 2500);
+});
+
+async function loadHistory(){
+  const listEl = document.getElementById('historyList');
+  listEl.innerHTML = '<div class="empty">Loading...</div>';
+  const date = todayStr();
+  try{
+    const res = await fetch(SCRIPT_URL);
+    const allRecords = await res.json();
+    const records = allRecords.filter(r => r.date === date);
+    if (records.length === 0){
+      listEl.innerHTML = '<div class="empty">No one marked present yet today.</div>';
+      return;
+    }
+    records.reverse();
+    listEl.innerHTML = '';
+    records.forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'hist-entry';
+      div.innerHTML = `
+        <div class="hist-left">
+          <span class="hist-name"><span class="dot"></span>${r.name}</span>
+          <span class="hist-meta">${r.shift} shift • ${r.time}</span>
+        </div>
+      `;
+      listEl.appendChild(div);
+    });
+  }catch(e){
+    listEl.innerHTML = '<div class="empty">Could not load. Check your internet connection.</div>';
+  }
+}
+
+document.getElementById('refreshBtn').addEventListener('click', loadHistory);
+loadHistory();
+</script>
+</body>
+</html>
